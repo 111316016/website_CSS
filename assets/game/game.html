@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Neural Overload - 李翊豪版</title>
+    <style>
+        :root {
+            --bg-color: #050a10;
+            --ui-safe: #00ffcc;
+            --ui-danger: #ff0050;
+            --ui-gold: #ffcc00;
+            --font-main: 'Courier New', Courier, monospace;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            font-family: var(--font-main);
+            color: var(--ui-safe);
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* --- 遊戲主容器 --- */
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 1024px;
+            max-height: 768px;
+            background: radial-gradient(circle at center, #0a1520 0%, #000 100%);
+            border: 2px solid #004433;
+            box-shadow: 0 0 30px rgba(0, 255, 204, 0.1);
+            overflow: hidden;
+        }
+
+        /* 掃描線特效 */
+        #game-container::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 2;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+        }
+
+        /* 網格裝飾 */
+        .grid-bg {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: 
+                linear-gradient(rgba(0, 255, 204, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 204, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* --- HUD --- */
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            z-index: 10;
+            text-shadow: 0 0 5px var(--ui-safe);
+            pointer-events: none;
+        }
+
+        /* 左側 HUD 群組 (名字 + 分數) */
+        .hud-left {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .commander-info {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .commander-name {
+            font-size: 20px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 0 10px var(--ui-safe);
+            margin-left: 5px;
+        }
+
+        .score-display {
+            font-size: 24px;
+            color: var(--ui-safe);
+            letter-spacing: 1px;
+            text-shadow: 0 0 10px var(--ui-safe);
+        }
+
+        /* 右側 HUD 群組 */
+        .hud-right-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+        }
+
+        /* Combo 顯示樣式 */
+        #combo-display {
+            font-size: 48px;
+            font-weight: 900;
+            color: var(--ui-safe);
+            opacity: 0;
+            transform-origin: center;
+            transition: opacity 0.2s, color 0.2s;
+            text-shadow: 2px 2px 0 rgba(0,0,0,0.5);
+            font-style: italic;
+        }
+
+        /* 血條樣式 */
+        .health-bar-container {
+            width: 200px;
+            height: 20px;
+            background: #111;
+            border: 1px solid #333;
+            position: relative;
+        }
+
+        #health-bar {
+            width: 100%;
+            height: 100%;
+            background-color: var(--ui-safe);
+            box-shadow: 0 0 10px var(--ui-safe);
+            transition: width 0.2s, background-color 0.2s;
+        }
+
+        /* --- 節點 (Node) --- */
+        .node {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.2);
+            transform: translate(-50%, -50%) scale(0);
+            cursor: pointer;
+            z-index: 5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 12px;
+            transition: transform 0.1s;
+            animation: spawnPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        .node:active { transform: translate(-50%, -50%) scale(0.9); }
+
+        /* 正常狀態 (Idle/Safe) */
+        .node.idle {
+            background-color: rgba(0, 255, 204, 0.1);
+            border-color: var(--ui-safe);
+            box-shadow: 0 0 10px var(--ui-safe);
+            color: var(--ui-safe);
+        }
+
+        /* 異常狀態 (Critical/Danger) */
+        .node.critical {
+            background-color: rgba(255, 0, 80, 0.2);
+            border-color: var(--ui-danger);
+            box-shadow: 0 0 20px var(--ui-danger);
+            color: var(--ui-danger);
+            animation: pulse 0.5s infinite alternate;
+        }
+        
+        /* 驚嘆號 */
+        .node.critical::after {
+            content: "!";
+            font-size: 32px;
+            font-weight: 900;
+        }
+
+        /* --- UI 畫面 (Start / Game Over) --- */
+        .screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 5, 10, 0.85);
+            z-index: 20;
+            transition: opacity 0.3s;
+            overflow: hidden; /* 防止背景動畫溢出 */
+        }
+        
+        .hidden { opacity: 0; pointer-events: none; }
+
+        /* Start Screen Layout */
+        #start-screen {
+            display: flex;
+            flex-direction: row; /* 左右排列 */
+            justify-content: center;
+            align-items: center;
+            gap: 60px; /* 左右間距 */
+        }
+
+        /* 右上角設計者名牌 */
+        .designer-credit-corner {
+            position: absolute;
+            top: 40px;
+            right: 40px;
+            z-index: 10;
+        }
+
+        /* 整合後的名牌樣式 */
+        .designer-badge-unified {
+            font-size: 1.5rem; /* 字體改小 */
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 0 10px var(--ui-safe);
+            background: rgba(0, 255, 204, 0.1);
+            padding: 8px 20px;
+            border: 1px solid var(--ui-safe);
+            display: inline-block;
+            white-space: nowrap; /* 強制不換行 */
+        }
+
+        /* Start Left: 標題 */
+        .start-left {
+            text-align: right;
+            border-right: 2px solid var(--ui-safe);
+            padding-right: 40px;
+            position: relative;
+            z-index: 5;
+        }
+
+        .title-zh {
+            font-size: 5rem;
+            margin: 0;
+            color: #fff;
+            text-shadow: 4px 4px 0 #ff0050, -2px -2px 0 #00ffcc;
+            letter-spacing: 10px;
+            line-height: 1.1;
+            font-weight: 900;
+        }
+
+        .title-en {
+            font-size: 1.5rem;
+            margin: 0;
+            color: var(--ui-safe);
+            letter-spacing: 5px;
+            opacity: 0.8;
+            margin-bottom: 30px;
+        }
+
+        /* Start Right: 說明與按鈕 */
+        .start-right {
+            text-align: left;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            position: relative;
+            z-index: 5;
+        }
+
+        .instructions {
+            font-size: 1.1rem;
+            color: #ccc;
+            line-height: 1.8;
+        }
+
+        .highlight { color: #ff0050; font-weight: bold; }
+        .safe-text { color: #00ffcc; }
+
+        /* Game Over Screen Layout */
+        #game-over-screen {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        #game-over-screen h1 {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: #ff0050;
+            text-shadow: 0 0 20px #ff0050;
+        }
+
+        .final-score-label {
+            font-size: 1.2rem;
+            color: #aaa;
+            letter-spacing: 2px;
+        }
+        
+        #final-score {
+            font-size: 5rem;
+            font-weight: bold;
+            color: #fff;
+            margin: 10px 0 40px 0;
+            text-shadow: 0 0 30px var(--ui-safe);
+        }
+
+        /* 按鈕群組 */
+        .btn-group {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        button {
+            background: transparent;
+            color: var(--ui-safe);
+            border: 2px solid var(--ui-safe);
+            padding: 15px 40px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            font-family: inherit;
+            text-transform: uppercase;
+            font-weight: bold;
+            transition: all 0.2s;
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.1);
+            min-width: 180px;
+        }
+
+        button:hover {
+            background: var(--ui-safe);
+            color: #000;
+            box-shadow: 0 0 40px rgba(0, 255, 204, 0.6);
+            transform: scale(1.05);
+        }
+
+        /* --- 起始畫面動態背景特效 (增強版) --- */
+        .start-decor-layer {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 100%; height: 100%;
+            transform: translate(-50%, -50%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .deco-ring {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            border: 2px dashed rgba(0, 255, 204, 0.5); /* 增加亮度與寬度 */
+            border-radius: 50%;
+            animation: rotateRing infinite linear;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2); /* 加入光暈 */
+        }
+
+        .deco-square {
+            position: absolute;
+            background: rgba(0, 255, 204, 0.6); /* 增加亮度 */
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.5); /* 加入強烈光暈 */
+            animation: floatUpBg infinite linear;
+        }
+
+        @keyframes rotateRing {
+            from { transform: translate(-50%, -50%) rotate(0deg); }
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        @keyframes floatUpBg {
+            0% { transform: translateY(100vh) rotate(0deg); opacity: 0; }
+            20% { opacity: 0.8; } /* 提高最大不透明度 */
+            80% { opacity: 0.5; } 
+            100% { transform: translateY(-100px) rotate(180deg); opacity: 0; }
+        }
+
+        /* --- 特效動畫 --- */
+        @keyframes spawnPop { to { transform: translate(-50%, -50%) scale(1); } }
+        @keyframes pulse { 
+            from { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 10px var(--ui-danger); } 
+            to { transform: translate(-50%, -50%) scale(1.1); box-shadow: 0 0 25px var(--ui-danger); } 
+        }
+        
+        /* 浮動數字 */
+        .float-text {
+            position: absolute;
+            font-weight: bold;
+            font-size: 20px;
+            pointer-events: none;
+            animation: floatUp 0.8s forwards;
+            z-index: 12;
+            text-shadow: 1px 1px 0 #000;
+        }
+        @keyframes floatUp { to { transform: translateY(-40px); opacity: 0; } }
+
+        /* 畫面震動與干擾 */
+        .shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+        .glitch-screen { animation: glitch 0.2s linear infinite; }
+
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+        @keyframes glitch {
+            0% { transform: translate(0); }
+            20% { transform: translate(-2px, 2px); }
+            40% { transform: translate(-2px, -2px); }
+            60% { transform: translate(2px, 2px); }
+            80% { transform: translate(2px, -2px); }
+            100% { transform: translate(0); }
+        }
+
+        /* --- 爆炸特效粒子 --- */
+        .particle {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background-color: #fff;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 15;
+            box-shadow: 0 0 10px var(--ui-danger);
+        }
+        
+        /* Mobile RWD adjustment */
+        @media (max-width: 800px) {
+            #start-screen { flex-direction: column; gap: 30px; text-align: center; }
+            .start-left { border-right: none; border-bottom: 1px solid var(--ui-safe); padding-right: 0; padding-bottom: 20px; text-align: center; }
+            .start-right { text-align: center; align-items: center; }
+            .btn-group { flex-direction: column; gap: 15px; }
+            
+            /* 手機版將名牌改回置中流動佈局，避免擋到 */
+            .designer-credit-corner {
+                position: relative;
+                top: auto;
+                right: auto;
+                text-align: center;
+                margin-bottom: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div class="grid-bg"></div>
+
+        <!-- HUD -->
+        <div id="hud">
+            <div class="hud-left">
+                <!-- 左上角名字區 -->
+                <div class="commander-info">
+                    COMMANDER: <span class="commander-name">李翊豪</span>
+                </div>
+                <div class="score-display">SCORE: <span id="score-val">0</span></div>
+            </div>
+            
+            <div class="hud-right-group">
+                <div class="health-bar-container">
+                    <div id="health-bar"></div>
+                </div>
+                <!-- Combo 顯示區 -->
+                <div id="combo-display">x0</div>
+            </div>
+        </div>
+
+        <!-- 遊戲主圖層 -->
+        <div id="game-layer"></div>
+
+        <!-- 開始畫面 (左右分欄佈局) -->
+        <div id="start-screen" class="screen">
+            <!-- 裝飾動畫層 -->
+            <div class="start-decor-layer" id="start-decor"></div>
+
+            <!-- 右上角設計者名牌 (樣式整合調整) -->
+            <div class="designer-credit-corner">
+                <div class="designer-badge-unified">Game Design by 李翊豪</div>
+            </div>
+
+            <!-- 左側：標題 -->
+            <div class="start-left">
+                <h1 class="title-zh">神經過載</h1>
+                <h2 class="title-en">NEURAL OVERLOAD</h2>
+            </div>
+
+            <!-- 右側：說明與按鈕 -->
+            <div class="start-right">
+                <div class="instructions">
+                    <p>
+                        // 任務簡報 //<br>
+                        點擊 <span class="highlight">紅色警示 (!)</span> 節點修復。<br>
+                        連續修復可累積 <span style="color: var(--ui-gold);">COMBO</span>。<br>
+                        <span class="safe-text">切勿觸碰綠色正常節點。</span>
+                    </p>
+                </div>
+                <button onclick="game.start()">啟動系統</button>
+            </div>
+        </div>
+
+        <!-- 結束畫面 (移除名字) -->
+        <div id="game-over-screen" class="screen hidden">
+            <h1>SYSTEM FAILURE</h1>
+            <div class="final-score-label">FINAL SCORE</div>
+            <div id="final-score">0</div>
+            
+            <!-- 按鈕群組 -->
+            <div class="btn-group">
+                <button onclick="game.start()">重啟系統</button>
+                <button onclick="game.toHome()">回到首頁</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 遊戲核心邏輯 - 李翊豪版
+         */
+        const game = {
+            maxHealth: 100,
+            baseCriticalTime: 2000,
+            minCriticalTime: 600,
+            spawnRate: 0.02,
+
+            score: 0,
+            combo: 0,
+            health: 100,
+            isPlaying: false,
+            nodes: [],
+            animationId: null,
+
+            container: document.getElementById('game-layer'),
+            gameWrapper: document.getElementById('game-container'),
+            ui: {
+                score: document.getElementById('score-val'),
+                combo: document.getElementById('combo-display'),
+                healthBar: document.getElementById('health-bar'),
+                start: document.getElementById('start-screen'),
+                end: document.getElementById('game-over-screen'),
+                finalScore: document.getElementById('final-score'),
+                startDecor: document.getElementById('start-decor')
+            },
+
+            // 初始化背景動畫
+            initDecor() {
+                const container = this.ui.startDecor;
+                container.innerHTML = '';
+                
+                // 1. 創建同心圓環
+                const sizes = [400, 600, 800];
+                const speeds = [30, 45, 60];
+                sizes.forEach((size, i) => {
+                    const ring = document.createElement('div');
+                    ring.className = 'deco-ring';
+                    ring.style.width = size + 'px';
+                    ring.style.height = size + 'px';
+                    ring.style.animationDuration = speeds[i] + 's';
+                    // 隨機反向旋轉
+                    if(i % 2 === 0) ring.style.animationDirection = 'reverse';
+                    container.appendChild(ring);
+                });
+
+                // 2. 創建漂浮粒子 (增加大小與數量)
+                for(let i=0; i<20; i++) {
+                    const sq = document.createElement('div');
+                    sq.className = 'deco-square';
+                    // 增加粒子大小 (10px ~ 40px)
+                    const size = Math.random() * 30 + 10;
+                    sq.style.width = size + 'px';
+                    sq.style.height = size + 'px';
+                    sq.style.left = Math.random() * 100 + '%';
+                    sq.style.animationDuration = (Math.random() * 5 + 5) + 's';
+                    sq.style.animationDelay = (Math.random() * 5) + 's';
+                    container.appendChild(sq);
+                }
+            },
+
+            start() {
+                this.isPlaying = true;
+                this.score = 0;
+                this.combo = 0;
+                this.health = this.maxHealth;
+                this.nodes = [];
+                this.container.innerHTML = '';
+                
+                this.ui.start.classList.add('hidden');
+                this.ui.end.classList.add('hidden');
+                this.updateHUD();
+                this.updateComboUI();
+                
+                for(let i=0; i<3; i++) this.createNode();
+
+                if (this.animationId) cancelAnimationFrame(this.animationId);
+                this.loop();
+            },
+
+            // 回到首頁功能
+            toHome() {
+                this.isPlaying = false;
+                
+                // 清理所有節點
+                this.nodes.forEach(n => n.cleanup());
+                this.nodes = [];
+                this.container.innerHTML = '';
+
+                // 切換顯示
+                this.ui.end.classList.add('hidden');
+                this.ui.start.classList.remove('hidden');
+
+                // 停止畫面震動效果
+                this.gameWrapper.className = '';
+            },
+
+            loop() {
+                if (!this.isPlaying) return;
+
+                const maxNodes = 3 + Math.floor(this.score / 150);
+                if (this.nodes.length < Math.min(maxNodes, 10)) {
+                    if (Math.random() < (this.spawnRate + (this.score * 0.0001))) {
+                        this.createNode();
+                    }
+                }
+
+                const triggerChance = 0.005 + (this.score * 0.00005);
+
+                this.nodes.forEach(node => {
+                    if (node.state === 'idle' && Math.random() < triggerChance) {
+                        const duration = Math.max(
+                            this.minCriticalTime, 
+                            this.baseCriticalTime - (this.score * 2)
+                        );
+                        node.goCritical(duration);
+                    }
+                });
+
+                if (this.score > 300 && Math.random() < 0.02) {
+                    this.gameWrapper.classList.add('glitch-screen');
+                    setTimeout(() => this.gameWrapper.classList.remove('glitch-screen'), 200);
+                }
+
+                this.animationId = requestAnimationFrame(() => this.loop());
+            },
+
+            createNode() {
+                const pad = 60;
+                const w = this.gameWrapper.clientWidth;
+                const h = this.gameWrapper.clientHeight;
+                const x = Math.random() * (w - pad * 2) + pad;
+                const y = Math.random() * (h - pad * 2) + pad;
+
+                const node = new Node(x, y, this);
+                this.container.appendChild(node.el);
+                this.nodes.push(node);
+            },
+
+            removeNode(nodeObj) {
+                nodeObj.destroy();
+                this.nodes = this.nodes.filter(n => n !== nodeObj);
+            },
+
+            addScore(amount, x, y) {
+                this.combo++;
+                
+                const multiplier = 1 + (this.combo * 0.1);
+                const finalScore = Math.floor(amount * multiplier);
+
+                this.score += finalScore;
+                
+                this.showFloatText(`+${finalScore}`, x, y, '#fff');
+                this.updateHUD();
+                this.updateComboUI();
+            },
+
+            takeDamage(amount, x, y) {
+                if (this.combo > 0) {
+                    this.showFloatText("COMBO LOST", x, y - 30, "var(--ui-danger)");
+                }
+                this.combo = 0;
+                this.updateComboUI();
+
+                this.health -= amount;
+                if (this.health < 0) this.health = 0;
+                
+                this.showFloatText(`-${amount}%`, x, y, 'var(--ui-danger)');
+                this.updateHUD();
+                
+                this.gameWrapper.classList.remove('shake');
+                void this.gameWrapper.offsetWidth; 
+                this.gameWrapper.classList.add('shake');
+
+                if (this.health <= 0) {
+                    this.gameOver();
+                }
+            },
+
+            updateHUD() {
+                this.ui.score.innerText = this.score;
+                const pct = (this.health / this.maxHealth) * 100;
+                this.ui.healthBar.style.width = `${pct}%`;
+                
+                if (pct < 30) {
+                    this.ui.healthBar.style.backgroundColor = '#ff0050';
+                    this.ui.healthBar.style.boxShadow = '0 0 10px #ff0050';
+                } else {
+                    this.ui.healthBar.style.backgroundColor = '#00ffcc';
+                    this.ui.healthBar.style.boxShadow = '0 0 10px #00ffcc';
+                }
+            },
+
+            updateComboUI() {
+                const el = this.ui.combo;
+                if (this.combo > 1) {
+                    el.innerText = `x${this.combo}`;
+                    el.style.opacity = '1';
+                    
+                    const shakeIntensity = Math.min(this.combo * 2, 15);
+                    const scaleBonus = Math.min(this.combo * 0.05, 0.5);
+                    
+                    const rotate = (Math.random() - 0.5) * shakeIntensity;
+                    el.style.transform = `rotate(${rotate}deg) scale(${1 + scaleBonus})`;
+
+                    if (this.combo >= 10) {
+                        el.style.color = 'var(--ui-gold)';
+                        el.style.textShadow = '0 0 20px var(--ui-gold)';
+                    } else {
+                        el.style.color = 'var(--ui-safe)';
+                        el.style.textShadow = '2px 2px 0 rgba(0,0,0,0.5)';
+                    }
+
+                } else {
+                    el.style.opacity = '0';
+                    el.style.transform = 'scale(1)';
+                }
+            },
+
+            showFloatText(text, x, y, color) {
+                const el = document.createElement('div');
+                el.className = 'float-text';
+                el.innerText = text;
+                el.style.left = x + 'px';
+                el.style.top = y + 'px';
+                el.style.color = color;
+                this.container.appendChild(el);
+                setTimeout(() => el.remove(), 800);
+            },
+
+            createExplosion(x, y) {
+                const particleCount = 12;
+                for (let i = 0; i < particleCount; i++) {
+                    const p = document.createElement('div');
+                    p.className = 'particle';
+                    p.style.left = x + 'px';
+                    p.style.top = y + 'px';
+                    
+                    const angle = Math.random() * Math.PI * 2;
+                    const velocity = Math.random() * 50 + 30;
+                    const tx = Math.cos(angle) * velocity;
+                    const ty = Math.sin(angle) * velocity;
+                    
+                    p.style.transform = `translate(-50%, -50%)`;
+                    p.style.transition = 'transform 0.4s ease-out, opacity 0.4s ease-out';
+                    
+                    this.container.appendChild(p);
+
+                    requestAnimationFrame(() => {
+                        p.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(0)`;
+                        p.style.opacity = '0';
+                    });
+
+                    setTimeout(() => p.remove(), 400);
+                }
+            },
+
+            gameOver() {
+                this.isPlaying = false;
+                this.nodes.forEach(n => n.cleanup());
+                this.ui.finalScore.innerText = this.score;
+                this.ui.end.classList.remove('hidden');
+            }
+        };
+
+        class Node {
+            constructor(x, y, gameCtx) {
+                this.game = gameCtx;
+                this.x = x;
+                this.y = y;
+                this.state = 'idle'; 
+                this.timer = null;
+
+                this.el = document.createElement('div');
+                this.el.className = 'node idle';
+                this.el.style.left = x + 'px';
+                this.el.style.top = y + 'px';
+
+                const clickHandler = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.handleClick();
+                };
+                this.el.addEventListener('mousedown', clickHandler);
+                this.el.addEventListener('touchstart', clickHandler);
+            }
+
+            goCritical(duration) {
+                if (this.state !== 'idle') return;
+                
+                this.state = 'critical';
+                this.el.className = 'node critical';
+                
+                this.timer = setTimeout(() => {
+                    this.handleTimeout();
+                }, duration);
+            }
+
+            handleClick() {
+                if (!this.game.isPlaying) return;
+
+                if (this.state === 'critical') {
+                    if (this.timer) clearTimeout(this.timer);
+                    this.game.addScore(10, this.x, this.y);
+                    
+                    this.game.createExplosion(this.x, this.y);
+
+                    if (Math.random() > 0.5) {
+                        this.game.removeNode(this);
+                    } else {
+                        this.resetToIdle();
+                    }
+                } else {
+                    this.game.takeDamage(15, this.x, this.y);
+                    this.game.removeNode(this);
+                }
+            }
+
+            handleTimeout() {
+                if (!this.game.isPlaying) return;
+                this.game.takeDamage(20, this.x, this.y);
+                this.game.removeNode(this); 
+            }
+
+            resetToIdle() {
+                this.state = 'idle';
+                this.el.className = 'node idle';
+                if (this.timer) clearTimeout(this.timer);
+            }
+
+            cleanup() {
+                if (this.timer) clearTimeout(this.timer);
+            }
+
+            destroy() {
+                this.cleanup();
+                this.el.style.transform = 'translate(-50%, -50%) scale(0)';
+                setTimeout(() => {
+                    if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
+                }, 200);
+            }
+        }
+
+        // 啟動背景動畫
+        window.onload = function() {
+            game.initDecor();
+        };
+    </script>
+</body>
+</html>
